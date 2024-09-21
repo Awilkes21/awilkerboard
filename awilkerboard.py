@@ -25,6 +25,7 @@ def load_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
+    save_config(DEFAULT_CONFIG)
     return DEFAULT_CONFIG
 
 # Save configuration
