@@ -1,2 +1,5 @@
 discord.log
 bot_config.json
+token.txt
+
+*.log
