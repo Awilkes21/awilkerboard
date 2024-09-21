@@ -113,8 +113,12 @@ async def untrack_reaction(ctx, emoji: str = None):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def show_config(ctx):
-    channel = bot.get_channel(config['target_channel_id'])
-    channel_mention = channel.mention if channel else "Not set"
+    try:
+        channel = bot.get_channel(config['target_channel_id'])
+        channel_mention = channel.mention if channel else "Not set"
+    except AttributeError:
+        channel_mention = "Invalid channel ID"
+
     
     embed = discord.Embed(title="Current Configuration", color=discord.Color.blue())
     embed.add_field(name="Target Channel", value=channel_mention, inline=False)
@@ -141,8 +145,16 @@ async def clear_bot_messages(ctx, channel: discord.TextChannel = None):
     async with ctx.typing():
         async for message in target_channel.history(limit=None):
             if message.author == bot.user:
-                if any(message.content.startswith(prefix) for prefix in config_prefixes):
-                    await message.delete()
+                if not message.reference or message.reference.resolved.author != bot.user:
+                    should_preserve = any(prefix in message.content for prefix in config_prefixes) or \
+                                      any(f"{emoji} reacted with" in message.content for emoji in config['emoji_configs']) or \
+                                      any(emoji_config['message'].split('{')[0] in message.content for emoji_config in config['emoji_configs'].values())
+                    
+                    if should_preserve:
+                        print(f"Preserving message: {message.content[:50]}...")
+                    else:
+                        print(f"Deleting message: {message.content[:50]}...")
+                        await message.delete()
 
     # Delete the command message itself
     await ctx.message.delete()
