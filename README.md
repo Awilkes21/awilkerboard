@@ -58,5 +58,9 @@ To run the bot, make sure to set the environment variable AWILKERBOARD_TOKEN wit
 
 ```python awilkerboard.py```
 
+To add to env temporarily, put token in token.txt
+
+```$env:AWILKERBOARD_TOKEN = (Get-Content -Path "token.txt" -Raw).Trim()```
+
 
 
