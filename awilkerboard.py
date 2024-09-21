@@ -122,8 +122,9 @@ async def show_config(ctx):
     if not config['emoji_configs']:
         embed.add_field(name="Tracked Reactions", value="No reactions are currently being tracked.", inline=False)
     else:
-        for emoji, emoji_config in config['emoji_configs'].items():
-            await ctx.send(embed=embed)
+        for emoji, emoji_config in config['emoji_configs'].items(): 
+            embed.add_field(name=emoji, value=f"Threshold: {emoji_config['threshold']}, Message: {emoji_config['message']}", inline=False)
+    await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
