@@ -1,6 +1,7 @@
 import os
 import json
 import discord
+import logging
 from discord.ext import commands
 
 # Set up the bot
@@ -8,6 +9,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
 bot = commands.Bot(command_prefix='!', intents=intents)
+handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
 
 # Configuration file
 CONFIG_FILE = 'bot_config.json'
@@ -51,28 +53,37 @@ async def on_reaction_add(reaction, user):
             )
             await target_channel.send(message)
 
+
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def set_channel(ctx, *, channel_name):
+async def set_channel(ctx, *, channel_name=None):
+    if channel_name is None:
+        await ctx.send("Error: Please provide a channel name. Usage: !set_channel <channel_name>")
+        return
+
     channel = discord.utils.get(ctx.guild.text_channels, name=channel_name)
     if channel:
         config['target_channel_id'] = channel.id
         save_config(config)
         await ctx.send(f"Target channel set to {channel.mention}")
     else:
-        await ctx.send(f"Channel '{channel_name}' not found. Please provide a valid channel name.")
+        await ctx.send(f"Error: Channel '{channel_name}' not found. Please provide a valid channel name.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def track_reaction(ctx, emoji: str, threshold: str, *, message):
+async def track_reaction(ctx, emoji: str = None, threshold: str = None, *, message=None):
+    if emoji is None or threshold is None or message is None:
+        await ctx.send("Error: Invalid syntax. Usage: !track_reaction <emoji> <threshold> <message>")
+        return
+
     try:
         threshold_value = int(threshold)
         if threshold_value <= 0:
-            await ctx.send("The threshold must be a positive number.")
+            await ctx.send("Error: The threshold must be a positive number.")
             return
         
         if len(emoji) != 1 and not emoji.startswith('<:') and not emoji.startswith('<a:'):
-            await ctx.send("Please provide a single emoji. Custom emojis are also accepted.")
+            await ctx.send("Error: Please provide a single emoji. Custom emojis are also accepted.")
             return
         
         config['emoji_configs'][emoji] = {
@@ -82,17 +93,21 @@ async def track_reaction(ctx, emoji: str, threshold: str, *, message):
         save_config(config)
         await ctx.send(f"Reaction {emoji} is now being tracked with threshold {threshold_value} and custom message.")
     except ValueError:
-        await ctx.send("Please provide a valid number for the threshold. Usage: !track_reaction <emoji> <threshold> <message>")
+        await ctx.send("Error: Please provide a valid number for the threshold. Usage: !track_reaction <emoji> <threshold> <message>")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def untrack_reaction(ctx, emoji: str):
+async def untrack_reaction(ctx, emoji: str = None):
+    if emoji is None:
+        await ctx.send("Error: Please provide an emoji. Usage: !untrack_reaction <emoji>")
+        return
+
     if emoji in config['emoji_configs']:
         del config['emoji_configs'][emoji]
         save_config(config)
         await ctx.send(f"Reaction {emoji} is no longer being tracked.")
     else:
-        await ctx.send(f"Reaction {emoji} was not being tracked.")
+        await ctx.send(f"Error: Reaction {emoji} was not being tracked.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -103,8 +118,35 @@ async def show_config(ctx):
     embed = discord.Embed(title="Current Configuration", color=discord.Color.blue())
     embed.add_field(name="Target Channel", value=channel_mention, inline=False)
     
-    for emoji, emoji_config in config['emoji_configs'].items():
-        await ctx.send(embed=embed)
+    if not config['emoji_configs']:
+        embed.add_field(name="Tracked Reactions", value="No reactions are currently being tracked.", inline=False)
+    else:
+        for emoji, emoji_config in config['emoji_configs'].items():
+            await ctx.send(embed=embed)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def clear_bot_messages(ctx, channel: discord.TextChannel = None):
+    target_channel = channel or ctx.channel
+    
+    config_prefixes = [
+        "Target channel set to",
+        "Reaction",
+        "Current Configuration",
+        "Error:"  # Include error messages related to configuration
+    ]
+    
+    async with ctx.typing():
+        async for message in target_channel.history(limit=None):
+            if message.author == bot.user:
+                if any(message.content.startswith(prefix) for prefix in config_prefixes):
+                    await message.delete()
+
+    # Delete the command message itself
+    await ctx.message.delete()
+
+
+
 
 # Run the bot
-bot.run(os.getenv('AWILKERBOARD_TOKEN'))
+bot.run(os.getenv('AWILKERBOARD_TOKEN'), log_handler=handler)
