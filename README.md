@@ -2,23 +2,14 @@
 Discord bot that tracks reactions and announces once a threshold is reached
 
 # Commands
-## set-channel
-Sets the channel where the bot will send messages when reactions are added.
-
-Usage:
-```/set_channel <channel_name>```
-
-Example:
-```/set_channel general```
-
 ## set-reaction
 Tracks a specific emoji's reactions. When the reaction count exceeds the specified threshold, the bot sends a custom message to the target channel.
 
 Usage:
-```/track_reaction <emoji> <threshold> <message>```
+```/track_reaction <emoji> <threshold> <channel>```
 
 Example:
-```/track_reaction 👍 5 "The 👍 reaction has reached 5!"```
+```/track_reaction 👍 5 general```
 
 ## remove-reaction
 Stops tracking a specific emoji's reactions. Deletes the rule
