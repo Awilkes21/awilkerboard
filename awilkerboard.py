@@ -74,15 +74,15 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             else:
                 message_time = local_time.strftime("%m/%d/%Y %I:%M %p")
 
-            # Initialize sent_messages for the guild if it doesn't exist
             if guild_id not in sent_messages:
                 sent_messages[guild_id] = {}
             
-            # Use the message ID to store the message
             message_id = reaction.message.id
 
             if message_id in sent_messages[guild_id]:
-                sent_message = await target_channel.fetch_message(sent_messages[guild_id][message_id]['message_id'])
+                sent_message_id = sent_messages[guild_id][message_id]  # Get the stored message ID
+                sent_message = await target_channel.fetch_message(sent_message_id)
+                
                 if reaction.count >= threshold:
                     await sent_message.edit(content=message_content)
                     embed = sent_message.embeds[0]  # Get the first embed from the message
@@ -90,7 +90,7 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
                     await sent_message.edit(embed=embed)
                 elif reaction.count < threshold:
                     await sent_message.delete()
-                    del sent_messages[guild_id][message_id]
+                    del sent_messages[guild_id][message_id]  # Remove the entry for this message
             else:
                 if reaction.count >= threshold:
                     embed = discord.Embed(description=reaction.message.content, color=discord.Color.purple())
@@ -98,8 +98,38 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
                     embed.set_footer(text=message_time)
 
                     sent_message = await target_channel.send(message_content, embed=embed)
-                    sent_messages[guild_id][message_id] = {'message_id': sent_message.id, 'emoji': emoji}
+                    sent_messages[guild_id][message_id] = sent_message.id  # Store the sent message ID
                     await sent_message.add_reaction(emoji)
+
+
+
+@bot.event
+async def on_reaction_remove(reaction: discord.Reaction, user: discord.User):
+    if user.bot or reaction.message.author == bot.user:
+        return
+    print("Reaction removed")
+
+    guild_id = reaction.message.guild.id
+    config = load_config(guild_id)
+
+    emoji = str(reaction.emoji)
+    if emoji in config['emoji_configs']:
+        emoji_config = config['emoji_configs'][emoji]
+        target_channel = bot.get_channel(emoji_config['target_channel_id'])
+        threshold = emoji_config['threshold']
+
+        if target_channel:
+            # Check if the message is tracked
+            message_id = reaction.message.id
+            if guild_id in sent_messages and message_id in sent_messages[guild_id]:
+                sent_message = await target_channel.fetch_message(sent_messages[guild_id][message_id]['message_id'])
+                
+                # Check the reaction count
+                if reaction.count < threshold:
+                    await sent_message.delete()
+                    del sent_messages[guild_id][message_id]  # Remove the entry for this message
+
+
 
 
 
