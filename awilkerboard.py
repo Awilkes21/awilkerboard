@@ -52,6 +52,8 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     config = load_config(guild_id)
 
     emoji = str(reaction.emoji)
+    print(f"Reaction added: {emoji} by {user.name}")
+
     if emoji in config['emoji_configs']:
         emoji_config = config['emoji_configs'][emoji]
         target_channel = bot.get_channel(emoji_config['target_channel_id'])
@@ -59,13 +61,10 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
 
         if target_channel:
             message_content = f"{reaction.count} {emoji} | {reaction.message.jump_url}\n\n"
-
-            # Convert the message time to the user's timezone
             created_at = reaction.message.created_at
             user_timezone = pytz.timezone('America/New_York')  # Replace with actual user's timezone
             local_time = created_at.astimezone(user_timezone)
 
-            # Time formatting
             now = datetime.now(user_timezone)
             if local_time.date() == now.date():
                 message_time = "Today at " + local_time.strftime("%I:%M %p")
@@ -74,48 +73,51 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             else:
                 message_time = local_time.strftime("%m/%d/%Y %I:%M %p")
 
-            # Initialize user_counts if it doesn't exist
-            if 'user_counts' not in emoji_config:
-                emoji_config['user_counts'] = {}
-
-            if user.id not in emoji_config['user_counts']:
-                emoji_config['user_counts'][user.id] = 0
-
-            current_count = emoji_config['user_counts'][user.id]
-
-            # Increment or decrement the user's count based on the reaction count
-            if reaction.count >= threshold and current_count == 0:
-                emoji_config['user_counts'][user.id] += 1
-            elif reaction.count < threshold and current_count > 0:
-                emoji_config['user_counts'][user.id] -= 1
-
-            # Check if a message for this emoji already exists
+            # Ensure guild entry exists
             if guild_id not in sent_messages:
                 sent_messages[guild_id] = {}
-            if emoji in sent_messages[guild_id]:
-                try:
-                    sent_message = await target_channel.fetch_message(sent_messages[guild_id][emoji])
-                except discord.errors.NotFound:
-                        print(f"Message not found for emoji: {emoji} in guild: {guild_id}")
-                        del sent_messages[guild_id][emoji]  # Clean up the stored message ID
-                        return  # Exit the function since the message doesn't exist
-                if reaction.count < threshold:
-                    await sent_message.delete()
-                    del sent_messages[guild_id][emoji]
-                else:
-                    await sent_message.edit(content=message_content)
-                    embed = sent_message.embeds[0]  # Get the first embed from the message
-                    embed.set_footer(text=message_time)  # Set the footer text
-                    await sent_message.edit(embed=embed)  # Edit the message with the updated embed
-            else:
-                if reaction.count >= threshold:
-                    embed = discord.Embed(description=reaction.message.content, color=discord.Color.purple())
-                    embed.set_author(name=reaction.message.author.name, icon_url=reaction.message.author.avatar.url)
-                    embed.set_footer(text=message_time)
 
-                    sent_message = await target_channel.send(message_content, embed=embed)
-                    sent_messages[guild_id][emoji] = sent_message.id
-                    await sent_message.add_reaction(emoji)
+            # Check for existing messages with this emoji
+            message_found = False
+            for message_id, message_data in sent_messages[guild_id].items():
+                if message_data['emoji'] == emoji:
+                    message_found = True
+                    try:
+                        sent_message = await target_channel.fetch_message(message_id)
+                    except discord.errors.NotFound:
+                        print(f"Message not found for emoji: {emoji} in guild: {guild_id}")
+                        del sent_messages[guild_id][message_id]
+                        return  # Exit since the message doesn't exist
+
+                    if reaction.count < threshold:
+                        await sent_message.delete()
+                        del sent_messages[guild_id][message_id]  # Remove the entry since the message was deleted
+                    else:
+                        await sent_message.edit(content=message_content)
+                        embed = sent_message.embeds[0]
+                        embed.set_footer(text=message_time)
+                        await sent_message.edit(embed=embed)
+                    break  # Exit the loop since we've found the message
+
+            # If no message found and threshold is met, create a new message
+            if not message_found and reaction.count >= threshold:
+                embed = discord.Embed(description=reaction.message.content, color=discord.Color.purple())
+                embed.set_author(name=reaction.message.author.name, icon_url=reaction.message.author.avatar.url)
+                embed.set_footer(text=message_time)
+
+                sent_message = await target_channel.send(message_content, embed=embed)
+
+                sent_messages[guild_id][sent_message.id] = {
+                    'threshold': threshold,
+                    'channel_id': target_channel.id,
+                    'emoji': emoji,
+                    'reaction_count': reaction.count
+                }
+                await sent_message.add_reaction(emoji)
+
+
+
+
 
 @bot.tree.command(name="set-reaction", description="Sets a rule for the bot with a specific target channel")
 @commands.has_permissions(administrator=True)
@@ -186,7 +188,7 @@ async def show_config(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="clear-bot-messages", description="Clears all messages sent by the bot.")
+@bot.tree.command(name="clear-awilkerboard-messages", description="Clears all messages sent by the bot.")
 @commands.has_permissions(administrator=True)
 @app_commands.describe(channel="The channel to clear messages from (defaults to the current channel)")
 async def clear_bot_messages(interaction: discord.Interaction, channel: discord.TextChannel = None):
