@@ -49,6 +49,9 @@ async def on_ready():
     except Exception as e:
         print(e)
 
+# Dictionary to store message IDs by emote
+sent_messages = {}
+
 @bot.event
 async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     if user.bot:  # Ignore bot reactions
@@ -61,6 +64,8 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     if emoji in config['emoji_configs']:
         emoji_config = config['emoji_configs'][emoji]
         target_channel = bot.get_channel(emoji_config['target_channel_id'])  # Get the specific target channel for this emoji
+        threshold = emoji_config['threshold']
+
         if target_channel:
             message_content = (
                 f"**{reaction.count} {emoji} |** "
@@ -81,27 +86,45 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             else:
                 message_time = local_time.strftime("%m/%d/%Y %I:%M %p")  # mm/dd/yyyy hh:mm AM/PM
 
-            # Create the embed for the original message
-            embed = discord.Embed(
-                description=reaction.message.content,
-                color=discord.Color.blue()
-            )
-            embed.set_author(name=reaction.message.author.name, icon_url=reaction.message.author.avatar.url)
-            embed.set_footer(text=message_time)
+            # Initialize user count if it doesn't exist
+            if emoji not in emoji_config:
+                emoji_config[emoji] = {'user_counts': {}}
 
-            # Check for attachments
-            if reaction.message.attachments:
-                for attachment in reaction.message.attachments:
-                    embed.set_image(url=attachment.url)  # Use the first attachment as the image
+            if user.id not in emoji_config['user_counts']:
+                emoji_config['user_counts'][user.id] = 0
 
-            # Check for stickers (if applicable)
-            if reaction.message.stickers:
-                for sticker in reaction.message.stickers:
-                    embed.add_field(name="Sticker", value=sticker.name, inline=False)
+            # Check the current count and threshold
+            current_count = emoji_config['user_counts'][user.id]
 
-            # Send the message and embed
-            sent_message = await target_channel.send(message_content, embed=embed)
-            await sent_message.add_reaction(emoji)
+            # Increment or decrement the user's count based on the reaction count
+            if reaction.count >= threshold and current_count == 0:
+                emoji_config['user_counts'][user.id] += 1  # Increment on reaching threshold
+            elif reaction.count < threshold and current_count > 0:
+                emoji_config['user_counts'][user.id] -= 1  # Decrement if it drops below threshold
+
+            # Check if a message for this emoji already exists
+            if emoji in sent_messages:
+                sent_message = await target_channel.fetch_message(sent_messages[emoji])
+                if reaction.count < threshold:
+                    await sent_message.delete()  # Delete the message if below the threshold
+                    del sent_messages[emoji]  # Remove the entry from the dictionary
+                else:
+                    await sent_message.edit(content=message_content)
+                    await sent_message.set_footer(text=message_time)
+            else:
+                if reaction.count >= threshold:
+                    # Create the embed for the original message
+                    embed = discord.Embed(
+                        description=reaction.message.content,
+                        color=discord.Color.blue()
+                    )
+                    embed.set_author(name=reaction.message.author.name, icon_url=reaction.message.author.avatar.url)
+                    embed.set_footer(text=message_time)
+
+                    # Send the message and embed
+                    sent_message = await target_channel.send(message_content, embed=embed)
+                    sent_messages[emoji] = sent_message.id  # Store the sent message ID
+                    await sent_message.add_reaction(emoji)
 
 
 # Update the track_reaction command
@@ -160,13 +183,13 @@ async def show_config(interaction: discord.Interaction):
         for emoji, emoji_config in config['emoji_configs'].items():
             target_channel = bot.get_channel(emoji_config['target_channel_id'])
             channel_mention = target_channel.mention if target_channel else "Channel not found"
-            embed.add_field(name=emoji, value=f"Threshold: {emoji_config['threshold']}, Message: {emoji_config['message']}, Target Channel: {channel_mention}", inline=False)
+            embed.add_field(name=emoji, value=f"Threshold: {emoji_config['threshold']}, Target Channel: {channel_mention}", inline=False)
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="clear-awilkerboard-messages", description="Clears all messages except for those generated by reactions")
 @commands.has_permissions(administrator=True)
-@app_commands.describe(channel = "The channel to clear messages from (defaults to the current channel)")
+@app_commands.describe(channel="The channel to clear messages from (defaults to the current channel)")
 async def clear_bot_messages(interaction: discord.Interaction, channel: discord.TextChannel = None):
     target_channel = channel or interaction.channel
     
@@ -183,18 +206,45 @@ async def clear_bot_messages(interaction: discord.Interaction, channel: discord.
         if message.author == bot.user:
             # Check if the message should be preserved
             if not message.reference or message.reference.resolved.author != bot.user:
-                should_preserve = (
-                    any(prefix in message.content for prefix in config_prefixes) or
-                    any(f"{emoji} reacted with" in message.content for emoji in config['emoji_configs']) or
-                    any(emoji_config['message'].split('{')[0] in message.content for emoji_config in config['emoji_configs'].values())
-                )
+                should_preserve = any(prefix in message.content for prefix in config_prefixes)
                 
                 if should_preserve:
                     print(f"Preserving message: {message.content[:50]}...")
                 else:
                     print(f"Deleting message: {message.content[:50]}...")
                     await message.delete()
-                    await asyncio.sleep(1)  
+                    await asyncio.sleep(1)
+
+
+@bot.tree.command(name="leaderboard", description="Shows the leaderboard for reactions.")
+@app_commands.describe(emoji="Optional emoji to show the leaderboard for")
+async def leaderboard(interaction: discord.Interaction, emoji: str = None):
+    embed = discord.Embed(title="Reaction Leaderboard", color=discord.Color.blue())
+    
+    if emoji:
+        emoji_config = config['emoji_configs'].get(emoji)
+        if not emoji_config:
+            await interaction.response.send_message(f"Error: Emoji {emoji} is not being tracked.", ephemeral=True)
+            return
+
+        user_counts = emoji_config.get('user_counts', {})
+        if not user_counts:
+            embed.add_field(name=emoji, value="No users have reached the threshold yet.", inline=False)
+        else:
+            sorted_counts = sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
+            leaderboard_text = "\n".join([f"{interaction.guild.get_member(user_id).mention}: {count}" for user_id, count in sorted_counts])
+            embed.add_field(name=emoji, value=leaderboard_text or "No counts yet.", inline=False)
+    else:
+        for emoji, emoji_config in config['emoji_configs'].items():
+            user_counts = emoji_config.get('user_counts', {})
+            if user_counts:
+                sorted_counts = sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
+                leaderboard_text = "\n".join([f"{interaction.guild.get_member(user_id).mention}: {count}" for user_id, count in sorted_counts])
+                embed.add_field(name=emoji, value=leaderboard_text or "No counts yet.", inline=False)
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 
 
 # Run the bot
