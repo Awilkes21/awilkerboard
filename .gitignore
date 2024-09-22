@@ -1,5 +1,8 @@
 discord.log
 bot_config.json
 token.txt
+config.py
+
+__pycache__
 
 *.log
