@@ -3,6 +3,9 @@ import json
 import discord
 import logging
 import asyncio
+from datetime import datetime, timedelta
+import pytz
+from discord.utils import format_dt
 from discord.ext import commands
 from discord import app_commands
 from config import token
@@ -19,7 +22,6 @@ CONFIG_FILE = 'bot_config.json'
 
 # Default configuration
 DEFAULT_CONFIG = {
-    'target_channel_id': None,
     'emoji_configs': {}
 }
 
@@ -52,57 +54,83 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     if user.bot:  # Ignore bot reactions
         return
 
+    if reaction.message.author == bot.user:  # Ignore reactions to messages sent by the bot
+        return
+
     emoji = str(reaction.emoji)
     if emoji in config['emoji_configs']:
         emoji_config = config['emoji_configs'][emoji]
-        target_channel = bot.get_channel(config['target_channel_id'])
+        target_channel = bot.get_channel(emoji_config['target_channel_id'])  # Get the specific target channel for this emoji
         if target_channel:
-            message = emoji_config['message'].format(
-                channel=reaction.message.channel.mention,
-                count=reaction.count,
-                emoji=emoji,
-                url=reaction.message.jump_url
+            message_content = (
+                f"**{reaction.count} {emoji} |** "
+                f"[{reaction.message.channel.name}]({reaction.message.jump_url})\n\n"
             )
-            await target_channel.send(message)
+
+            # Convert the message time to the user's timezone
+            created_at = reaction.message.created_at
+            user_timezone = pytz.timezone('America/New_York')  # Replace with actual user's timezone
+            local_time = created_at.astimezone(user_timezone)
+
+            # Determine the message time format
+            now = datetime.now(user_timezone)
+            if local_time.date() == now.date():
+                message_time = "Today at " + local_time.strftime("%I:%M %p")
+            elif local_time.date() == (now - timedelta(days=1)).date():
+                message_time = "Yesterday at " + local_time.strftime("%I:%M %p")
+            else:
+                message_time = local_time.strftime("%m/%d/%Y %I:%M %p")  # mm/dd/yyyy hh:mm AM/PM
+
+            # Create the embed for the original message
+            embed = discord.Embed(
+                description=reaction.message.content,
+                color=discord.Color.blue()
+            )
+            embed.set_author(name=reaction.message.author.name, icon_url=reaction.message.author.avatar.url)
+            embed.set_footer(text=message_time)
+
+            # Check for attachments
+            if reaction.message.attachments:
+                for attachment in reaction.message.attachments:
+                    embed.set_image(url=attachment.url)  # Use the first attachment as the image
+
+            # Check for stickers (if applicable)
+            if reaction.message.stickers:
+                for sticker in reaction.message.stickers:
+                    embed.add_field(name="Sticker", value=sticker.name, inline=False)
+
+            # Send the message and embed
+            sent_message = await target_channel.send(message_content, embed=embed)
+            await sent_message.add_reaction(emoji)
 
 
-
-@bot.tree.command(name="set-channel", description="Sets the default channel for the bot")
+# Update the track_reaction command
+@bot.tree.command(name="set-reaction", description="Sets a rule for the bot with a specific target channel")
 @commands.has_permissions(administrator=True)
-@app_commands.describe(channel_name = "The name of the channel the bot will write to")
-async def set_channel(interaction: discord.Interaction, channel_name: str):
-    if channel_name is None:
-        await interaction.response.send_message("Error: Please provide a channel name.", ephemeral=True)
-        return
-
-    channel = discord.utils.get(interaction.guild.text_channels, name=channel_name)
-    if channel:
-        config['target_channel_id'] = channel.id
-        save_config(config)
-        await interaction.response.send_message(f"Target channel set to {channel.mention}", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Error: Channel '{channel_name}' not found.", ephemeral=True)
-
-@bot.tree.command(name="set-reaction", description="Sets a rule for the bot")
-@commands.has_permissions(administrator=True)
-@app_commands.describe(emoji = "The emoji to track", threshold = "The number of reactions required to trigger the message", message = "The message to send when the threshold is reached")
-async def track_reaction(interaction: discord.Interaction, emoji: str, threshold: int, message: str):
+@app_commands.describe(emoji="The emoji to track", threshold="The number of reactions required to trigger the message", channel_name="The name of the channel to send the message")
+async def track_reaction(interaction: discord.Interaction, emoji: str, threshold: int, channel_name: str):
     if len(emoji) != 1 and not emoji.startswith('<:') and not emoji.startswith('<a:'):
         await interaction.response.send_message("Error: Please provide a single emoji. Custom emojis are also accepted.", ephemeral=True)
         return
-    
+
     if threshold <= 0:
         await interaction.response.send_message("Error: The threshold must be a positive number.", ephemeral=True)
         return
-    
+
+    # Get the target channel
+    channel = discord.utils.get(interaction.guild.text_channels, name=channel_name)
+    if not channel:
+        await interaction.response.send_message(f"Error: Channel '{channel_name}' not found.", ephemeral=True)
+        return
+
     # Update configuration
     config['emoji_configs'][emoji] = {
         'threshold': threshold,
-        'message': message
+        'target_channel_id': channel.id  # Store the target channel ID with the emoji config
     }
     save_config(config)
 
-    await interaction.response.send_message(f"Reaction {emoji} is now being tracked with threshold {threshold} and custom message.", ephemeral=True)
+    await interaction.response.send_message(f"Reaction {emoji} is now being tracked with threshold {threshold} in {channel.mention}.", ephemeral=True)
 
 
 @bot.tree.command(name="remove-reaction", description="Given an emote, remove its tracking rule")
@@ -123,22 +151,16 @@ async def untrack_reaction(interaction: discord.Interaction, emoji: str):
 @bot.tree.command(name="show-config", description="Show how the bot is currently configured")
 @commands.has_permissions(administrator=True)
 async def show_config(interaction: discord.Interaction):
-    try:
-        channel = bot.get_channel(config['target_channel_id'])
-        channel_mention = channel.mention if channel else "Not set"
-    except AttributeError:
-        channel_mention = "Invalid channel ID"
-
-    
     # Create an embed with the current configuration
     embed = discord.Embed(title="Current Configuration", color=discord.Color.blue())
-    embed.add_field(name="Target Channel", value=channel_mention, inline=False)
-    
+
     if not config['emoji_configs']:
         embed.add_field(name="Tracked Reactions", value="No reactions are currently being tracked.", inline=False)
     else:
         for emoji, emoji_config in config['emoji_configs'].items():
-            embed.add_field(name=emoji, value=f"Threshold: {emoji_config['threshold']}, Message: {emoji_config['message']}", inline=False)
+            target_channel = bot.get_channel(emoji_config['target_channel_id'])
+            channel_mention = target_channel.mention if target_channel else "Channel not found"
+            embed.add_field(name=emoji, value=f"Threshold: {emoji_config['threshold']}, Message: {emoji_config['message']}, Target Channel: {channel_mention}", inline=False)
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
