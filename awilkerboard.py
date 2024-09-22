@@ -74,39 +74,23 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             else:
                 message_time = local_time.strftime("%m/%d/%Y %I:%M %p")
 
-            # Initialize user_counts if it doesn't exist
-            if 'user_counts' not in emoji_config:
-                emoji_config['user_counts'] = {}
-
-            if user.id not in emoji_config['user_counts']:
-                emoji_config['user_counts'][user.id] = 0
-
-            current_count = emoji_config['user_counts'][user.id]
-
-            # Increment or decrement the user's count based on the reaction count
-            if reaction.count >= threshold and current_count == 0:
-                emoji_config['user_counts'][user.id] += 1
-            elif reaction.count < threshold and current_count > 0:
-                emoji_config['user_counts'][user.id] -= 1
-
-            # Check if a message for this emoji already exists
+            # Initialize sent_messages for the guild if it doesn't exist
             if guild_id not in sent_messages:
                 sent_messages[guild_id] = {}
-            if emoji in sent_messages[guild_id]:
-                try:
-                    sent_message = await target_channel.fetch_message(sent_messages[guild_id][emoji])
-                except discord.errors.NotFound:
-                        print(f"Message not found for emoji: {emoji} in guild: {guild_id}")
-                        del sent_messages[guild_id][emoji]  # Clean up the stored message ID
-                        return  # Exit the function since the message doesn't exist
-                if reaction.count < threshold:
-                    await sent_message.delete()
-                    del sent_messages[guild_id][emoji]
-                else:
+            
+            # Use the message ID to store the message
+            message_id = reaction.message.id
+
+            if message_id in sent_messages[guild_id]:
+                sent_message = await target_channel.fetch_message(sent_messages[guild_id][message_id]['message_id'])
+                if reaction.count >= threshold:
                     await sent_message.edit(content=message_content)
                     embed = sent_message.embeds[0]  # Get the first embed from the message
                     embed.set_footer(text=message_time)  # Set the footer text
-                    await sent_message.edit(embed=embed)  # Edit the message with the updated embed
+                    await sent_message.edit(embed=embed)
+                elif reaction.count < threshold:
+                    await sent_message.delete()
+                    del sent_messages[guild_id][message_id]
             else:
                 if reaction.count >= threshold:
                     embed = discord.Embed(description=reaction.message.content, color=discord.Color.purple())
@@ -114,8 +98,10 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
                     embed.set_footer(text=message_time)
 
                     sent_message = await target_channel.send(message_content, embed=embed)
-                    sent_messages[guild_id][emoji] = sent_message.id
+                    sent_messages[guild_id][message_id] = {'message_id': sent_message.id, 'emoji': emoji}
                     await sent_message.add_reaction(emoji)
+
+
 
 @bot.tree.command(name="set-reaction", description="Sets a rule for the bot with a specific target channel")
 @commands.has_permissions(administrator=True)
