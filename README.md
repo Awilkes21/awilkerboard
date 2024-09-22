@@ -6,19 +6,19 @@ Discord bot that tracks reactions and announces once a threshold is reached
 Tracks a specific emoji's reactions. When the reaction count exceeds the specified threshold, the bot sends a custom message to the target channel.
 
 Usage:
-```/track_reaction <emoji> <threshold> <channel>```
+```/set_reaction <emoji> <threshold> <channel>```
 
 Example:
-```/track_reaction 👍 5 general```
+```/set_reaction 👍 5 general```
 
 ## remove-reaction
 Stops tracking a specific emoji's reactions. Deletes the rule
 
 Usage:
-```/untrack_reaction <emoji>```
+```/remove_reaction <emoji>```
 
 Example:
-```/untrack_reaction 👍```
+```/remove_reaction 👍```
 
 ## show_config
 Displays the current bot configuration, including the target channel and tracked reactions.
