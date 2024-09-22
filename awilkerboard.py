@@ -93,16 +93,23 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             if guild_id not in sent_messages:
                 sent_messages[guild_id] = {}
             if emoji in sent_messages[guild_id]:
-                sent_message = await target_channel.fetch_message(sent_messages[guild_id][emoji])
+                try:
+                    sent_message = await target_channel.fetch_message(sent_messages[guild_id][emoji])
+                except discord.errors.NotFound:
+                        print(f"Message not found for emoji: {emoji} in guild: {guild_id}")
+                        del sent_messages[guild_id][emoji]  # Clean up the stored message ID
+                        return  # Exit the function since the message doesn't exist
                 if reaction.count < threshold:
                     await sent_message.delete()
                     del sent_messages[guild_id][emoji]
                 else:
                     await sent_message.edit(content=message_content)
-                    await sent_message.set_footer(text=message_time)
+                    embed = sent_message.embeds[0]  # Get the first embed from the message
+                    embed.set_footer(text=message_time)  # Set the footer text
+                    await sent_message.edit(embed=embed)  # Edit the message with the updated embed
             else:
                 if reaction.count >= threshold:
-                    embed = discord.Embed(description=reaction.message.content, color=discord.Color.blue())
+                    embed = discord.Embed(description=reaction.message.content, color=discord.Color.purple())
                     embed.set_author(name=reaction.message.author.name, icon_url=reaction.message.author.avatar.url)
                     embed.set_footer(text=message_time)
 
@@ -171,6 +178,9 @@ async def show_config(interaction: discord.Interaction):
     else:
         for emoji, emoji_config in config['emoji_configs'].items():
             target_channel = bot.get_channel(emoji_config['target_channel_id'])
+            if not target_channel:
+                print(f"Target channel not found for emoji {emoji} in guild {guild_id}")
+                return
             channel_mention = target_channel.mention if target_channel else "Channel not found"
             embed.add_field(name=emoji, value=f"Threshold: {emoji_config['threshold']}, Target Channel: {channel_mention}", inline=False)
 
