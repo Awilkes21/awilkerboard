@@ -5,7 +5,7 @@ import logging
 import asyncio
 from datetime import datetime, timedelta
 import pytz
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 from config import token
 
@@ -39,10 +39,9 @@ def save_config(guild_id, config):
 # Dictionary to store message IDs by guild and emoji
 sent_messages = {}
 
-@bot.event
-async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
-
+@tasks.loop(minutes=30)  # Run the loop every 30 minutes
+async def check_deleted_channels():
+    print(f"Checking for deleted text channels")
     # Iterate over all guilds the bot is in
     for guild in bot.guilds:
         guild_id = guild.id
@@ -69,7 +68,11 @@ async def on_ready():
             if emoji_configs_to_remove:
                 save_config(guild_id, config)
 
-    print("Checked all guilds for deleted channels.")
+@bot.event
+async def on_ready():
+    print(f'{bot.user} has connected to Discord!')
+    await check_deleted_channels.start()  # Start the periodic check
+
 
 @bot.event
 async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
