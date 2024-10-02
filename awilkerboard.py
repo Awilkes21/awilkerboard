@@ -43,6 +43,34 @@ sent_messages = {}
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
 
+    # Iterate over all guilds the bot is in
+    for guild in bot.guilds:
+        guild_id = guild.id
+        config = load_config(guild_id)
+
+        # If there are emoji configurations
+        if 'emoji_configs' in config:
+            emoji_configs_to_remove = []
+
+            # Check if the target channels still exist
+            for emoji, emoji_config in config['emoji_configs'].items():
+                target_channel = bot.get_channel(emoji_config['target_channel_id'])
+
+                if target_channel is None:
+                    # If the channel doesn't exist, mark the emoji config for removal
+                    emoji_configs_to_remove.append(emoji)
+
+            # Remove the invalid emoji configurations
+            for emoji in emoji_configs_to_remove:
+                del config['emoji_configs'][emoji]
+                print(f"Removed config for emoji {emoji} in guild {guild.name} as the target channel was deleted.")
+            
+            # Save updated config
+            if emoji_configs_to_remove:
+                save_config(guild_id, config)
+
+    print("Checked all guilds for deleted channels.")
+
 @bot.event
 async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     if user.bot or reaction.message.author == bot.user:
@@ -65,14 +93,8 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             user_timezone = pytz.timezone('America/New_York')  # Replace with actual user's timezone
             local_time = created_at.astimezone(user_timezone)
 
-            # Time formatting
-            now = datetime.now(user_timezone)
-            if local_time.date() == now.date():
-                message_time = "Today at " + local_time.strftime("%I:%M %p")
-            elif local_time.date() == (now - timedelta(days=1)).date():
-                message_time = "Yesterday at " + local_time.strftime("%I:%M %p")
-            else:
-                message_time = local_time.strftime("%m/%d/%Y %I:%M %p")
+            # Format the time as "MM/DD/YYYY HH:MM AM/PM"
+            message_time = local_time.strftime("%m/%d/%Y %I:%M %p")
 
             if guild_id not in sent_messages:
                 sent_messages[guild_id] = {}
@@ -93,8 +115,20 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
                     del sent_messages[guild_id][message_id]  # Remove the entry for this message
             else:
                 if reaction.count >= threshold:
+                    message_url = reaction.message.jump_url
+                    user_name = reaction.message.author.name
+                    user_avatar_url = reaction.message.author.avatar.url
                     embed = discord.Embed(description=reaction.message.content, color=discord.Color.purple())
-                    embed.set_author(name=reaction.message.author.name, icon_url=reaction.message.author.avatar.url)
+                    embed.set_author(name=user_name, icon_url=user_avatar_url, url=message_url)
+
+                    # Check if the original message has attachments (e.g., images)
+                    if reaction.message.attachments:
+                        for attachment in reaction.message.attachments:
+                            embed.set_image(url=attachment.url)
+                            
+                    if reaction.message.stickers:
+                        embed.set_image(url=reaction.message.stickers[0].url)
+
                     embed.set_footer(text=message_time)
 
                     sent_message = await target_channel.send(message_content, embed=embed)
